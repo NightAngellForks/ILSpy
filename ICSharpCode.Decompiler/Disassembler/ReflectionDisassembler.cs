@@ -1762,7 +1762,7 @@ namespace ICSharpCode.Decompiler.Disassembler {
 				}
 			}
 			if ((val & ~tested) != 0) {
-				output.Write("flag", BoxedTextColor.Keyword);
+				output.Write("flags", BoxedTextColor.Keyword);
 				int leftStart = output.NextPosition;
 				output.Write("(", BoxedTextColor.Keyword);
 				output.Write($"{val & ~tested:x4}", BoxedTextColor.Keyword);
@@ -1789,7 +1789,7 @@ namespace ICSharpCode.Decompiler.Disassembler {
 				}
 			}
 			if (val != 0) {
-				output.Write("flag", BoxedTextColor.Keyword);
+				output.Write("flags", BoxedTextColor.Keyword);
 				int leftStart = output.NextPosition;
 				output.Write("(", BoxedTextColor.Keyword);
 				output.Write($"{val:x4}", BoxedTextColor.Keyword);
