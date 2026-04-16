@@ -218,7 +218,7 @@ namespace ICSharpCode.Decompiler.Disassembler {
 			{ MethodAttributes.HideBySig, "hidebysig" },
 			{ MethodAttributes.SpecialName, "specialname" },
 			{ MethodAttributes.PinvokeImpl, null }, // handled separately
-			{ MethodAttributes.UnmanagedExport, "export" },
+			{ MethodAttributes.UnmanagedExport, "unmanagedexp" },
 			{ MethodAttributes.RTSpecialName, "rtspecialname" },
 			{ MethodAttributes.RequireSecObject, "reqsecobj" },
 			{ MethodAttributes.NewSlot, "newslot" },
@@ -303,66 +303,13 @@ namespace ICSharpCode.Decompiler.Disassembler {
 				output.Write(" ", BoxedTextColor.Text);
 			}
 
-			if ((method.Attributes & MethodAttributes.PinvokeImpl) == MethodAttributes.PinvokeImpl) {
+			if (method.IsPinvokeImpl) {
 				output.Write("pinvokeimpl", BoxedTextColor.Keyword);
+				var bh2 = BracePairHelper.Create(output, "(", CodeBracesRangeFlags.Parentheses);
 				if (method.HasImplMap) {
-					ImplMap info = method.ImplMap;
-					var bh2 = BracePairHelper.Create(output, "(", CodeBracesRangeFlags.Parentheses);
-					output.Write("\"" + NRefactory.CSharp.TextWriterTokenWriter.ConvertStringMaxLength(info.Module == null ? string.Empty : info.Module.Name.String, options.MaxStringLength) + "\"", BoxedTextColor.String);
-
-					if (!string.IsNullOrEmpty(info.Name) && info.Name != method.Name) {
-						output.Write(" ", BoxedTextColor.Text);
-						output.Write("as", BoxedTextColor.Keyword);
-						output.Write(" ", BoxedTextColor.Text);
-						output.Write("\"" + NRefactory.CSharp.TextWriterTokenWriter.ConvertStringMaxLength(info.Name, options.MaxStringLength) + "\"", BoxedTextColor.String);
-					}
-
-					if (info.IsNoMangle) {
-						output.Write(" ", BoxedTextColor.Text);
-						output.Write("nomangle", BoxedTextColor.Keyword);
-					}
-
-					if (info.IsCharSetAnsi) {
-						output.Write(" ", BoxedTextColor.Text);
-						output.Write("ansi", BoxedTextColor.Keyword);
-					}
-					else if (info.IsCharSetAuto) {
-						output.Write(" ", BoxedTextColor.Text);
-						output.Write("autochar", BoxedTextColor.Keyword);
-					}
-					else if (info.IsCharSetUnicode) {
-						output.Write(" ", BoxedTextColor.Text);
-						output.Write("unicode", BoxedTextColor.Keyword);
-					}
-
-					if (info.SupportsLastError) {
-						output.Write(" ", BoxedTextColor.Text);
-						output.Write("lasterr", BoxedTextColor.Keyword);
-					}
-
-					if (info.IsCallConvCdecl) {
-						output.Write(" ", BoxedTextColor.Text);
-						output.Write("cdecl", BoxedTextColor.Keyword);
-					}
-					else if (info.IsCallConvFastcall) {
-						output.Write(" ", BoxedTextColor.Text);
-						output.Write("fastcall", BoxedTextColor.Keyword);
-					}
-					else if (info.IsCallConvStdcall) {
-						output.Write(" ", BoxedTextColor.Text);
-						output.Write("stdcall", BoxedTextColor.Keyword);
-					}
-					else if (info.IsCallConvThiscall) {
-						output.Write(" ", BoxedTextColor.Text);
-						output.Write("thiscall", BoxedTextColor.Keyword);
-					}
-					else if (info.IsCallConvWinapi) {
-						output.Write(" ", BoxedTextColor.Text);
-						output.Write("winapi", BoxedTextColor.Keyword);
-					}
-
-					bh2.Write(")");
+					WriteImplMap(method.ImplMap, method.Name);
 				}
+				bh2.Write(")");
 				output.Write(" ", BoxedTextColor.Text);
 			}
 
@@ -379,7 +326,7 @@ namespace ICSharpCode.Decompiler.Disassembler {
 			}
 
 			//call convention
-			WriteEnum(method.CallingConvention & (CallingConvention)0x1f, callingConvention);
+			WriteEnum(method.CallingConvention, callingConvention);
 
 			//return type
 			method.ReturnType.WriteTo(output, sb);
@@ -1136,20 +1083,19 @@ namespace ICSharpCode.Decompiler.Disassembler {
 			if (constant == null) {
 				output.Write("nullref", BoxedTextColor.Keyword);
 			} else {
-				TypeSig typeSig;
-				string typeName = DisassemblerHelpers.PrimitiveTypeName(constant.GetType().FullName, options.OwnerModule, out typeSig);
+				string typeName = DisassemblerHelpers.PrimitiveTypeName(constant.GetType().FullName, options.OwnerModule, out var typeSig);
 				if (typeName != null && typeName != "string") {
 					DisassemblerHelpers.WriteKeyword(output, typeName, typeSig.ToTypeDefOrRef());
 					var bh1 = BracePairHelper.Create(output, "(", CodeBracesRangeFlags.Parentheses);
-					float? cf = constant as float?;
-					double? cd = constant as double?;
-					if (cf.HasValue && (float.IsNaN(cf.Value) || float.IsInfinity(cf.Value))) {
-						uint asUint32 = BitConverter.ToUInt32(BitConverter.GetBytes(cf.Value), 0);
+					if (constant is float cf && (float.IsNaN(cf) || float.IsInfinity(cf))) {
+						uint asUint32 = BitConverter.ToUInt32(BitConverter.GetBytes(cf), 0);
 						output.Write(numberFormatter.Format(asUint32), asUint32, numberFlags, BoxedTextColor.Number);
-					} else if (cd.HasValue && (double.IsNaN(cd.Value) || double.IsInfinity(cd.Value))) {
-						ulong asUlong = (ulong)BitConverter.DoubleToInt64Bits(cd.Value);
+					}
+					else if (constant is double cd && (double.IsNaN(cd) || double.IsInfinity(cd))) {
+						ulong asUlong = (ulong)BitConverter.DoubleToInt64Bits(cd);
 						output.Write(numberFormatter.Format(asUlong), asUlong, numberFlags, BoxedTextColor.Number);
-					} else {
+					}
+					else {
 						DisassemblerHelpers.WriteOperand(output, constant, options.MaxStringLength, numberFormatter, sb);
 					}
 					bh1.Write(")");
@@ -1194,12 +1140,30 @@ namespace ICSharpCode.Decompiler.Disassembler {
 			WriteEnum(field.Attributes & FieldAttributes.FieldAccessMask, fieldVisibility);
 			const FieldAttributes hasXAttributes = FieldAttributes.HasDefault | FieldAttributes.HasFieldMarshal | FieldAttributes.HasFieldRVA;
 			WriteFlags(field.Attributes & ~(FieldAttributes.FieldAccessMask | hasXAttributes), fieldAttributes);
+
+			if (field.IsPinvokeImpl) {
+				output.Write("pinvokeimpl", BoxedTextColor.Keyword);
+				var bh2 = BracePairHelper.Create(output, "(", CodeBracesRangeFlags.Parentheses);
+				if (field.HasImplMap) {
+					WriteImplMap(field.ImplMap, field.Name);
+				}
+				bh2.Write(")");
+				output.Write(" ", BoxedTextColor.Text);
+			}
+
 			if (field.HasMarshalType) {
 				WriteMarshalInfo(field.MarshalType);
 			}
+
 			field.FieldType.WriteTo(output, sb);
 			output.Write(" ", BoxedTextColor.Text);
-			output.Write(DisassemblerHelpers.Escape(field.Name), field, DecompilerReferenceFlags.Definition, CSharpMetadataTextColorProvider.Instance.GetColor(field));
+
+			if (field.IsPrivateScope) {
+				output.Write(DisassemblerHelpers.Escape(field.Name + "$PST" + field.MDToken.ToInt32().ToString("X8")), field, DecompilerReferenceFlags.Definition, CSharpMetadataTextColorProvider.Instance.GetColor(field));
+			} else {
+				output.Write(DisassemblerHelpers.Escape(field.Name), field, DecompilerReferenceFlags.Definition, CSharpMetadataTextColorProvider.Instance.GetColor(field));
+			}
+
 			char sectionPrefix = 'D';
 			if (field.HasFieldRVA) {
 				sectionPrefix = GetRVASectionPrefix(field.Module, field.RVA);
@@ -1272,7 +1236,7 @@ namespace ICSharpCode.Decompiler.Disassembler {
 		readonly EnumNameCollection<PropertyAttributes> propertyAttributes = new EnumNameCollection<PropertyAttributes>() {
 			{ PropertyAttributes.SpecialName, "specialname" },
 			{ PropertyAttributes.RTSpecialName, "rtspecialname" },
-			{ PropertyAttributes.HasDefault, "hasdefault" },
+			{ PropertyAttributes.HasDefault, null },
 		};
 
 		public void DisassembleProperty(PropertyDef property, bool full = true, bool addLineSep = true)
@@ -1299,6 +1263,13 @@ namespace ICSharpCode.Decompiler.Disassembler {
 				output.DecreaseIndent();
 			}
 			bh1.Write(")");
+
+			if (property.HasConstant) {
+				output.Write(" ", BoxedTextColor.Text);
+				output.Write("=", BoxedTextColor.Operator);
+				output.Write(" ", BoxedTextColor.Text);
+				WriteConstant(property.Constant.Value);
+			}
 
 			if (full) {
 				var bh2 = OpenBlock(CodeBracesRangeFlags.PropertyBraces);
@@ -1420,7 +1391,7 @@ namespace ICSharpCode.Decompiler.Disassembler {
 		};
 
 		readonly EnumNameCollection<TypeAttributes> typeStringFormat = new EnumNameCollection<TypeAttributes>() {
-			{ TypeAttributes.AutoClass, "auto" },
+			{ TypeAttributes.AutoClass, "autochar" },
 			{ TypeAttributes.AnsiClass, "ansi" },
 			{ TypeAttributes.UnicodeClass, "unicode" },
 		};
@@ -1433,6 +1404,7 @@ namespace ICSharpCode.Decompiler.Disassembler {
 			{ TypeAttributes.Serializable, "serializable" },
 			{ TypeAttributes.WindowsRuntime, "windowsruntime" },
 			{ TypeAttributes.BeforeFieldInit, "beforefieldinit" },
+			{ TypeAttributes.RTSpecialName, "rtspecialname" },
 			{ TypeAttributes.HasSecurity, null },
 		};
 
@@ -1652,8 +1624,13 @@ namespace ICSharpCode.Decompiler.Disassembler {
 					if (gp.HasReferenceTypeConstraint) {
 						output.Write("class", BoxedTextColor.Keyword);
 						output.Write(" ", BoxedTextColor.Text);
-					} else if (gp.HasNotNullableValueTypeConstraint) {
+					}
+					if (gp.HasNotNullableValueTypeConstraint) {
 						output.Write("valuetype", BoxedTextColor.Keyword);
+						output.Write(" ", BoxedTextColor.Text);
+					}
+					if (gp.AllowsByRefLike) {
+						output.Write("byreflike", BoxedTextColor.Keyword);
 						output.Write(" ", BoxedTextColor.Text);
 					}
 					if (gp.HasDefaultConstructorConstraint) {
@@ -1685,6 +1662,88 @@ namespace ICSharpCode.Decompiler.Disassembler {
 		#endregion
 
 		#region Helper methods
+
+		void WriteImplMap(ImplMap info, string memberName) {
+			output.Write("\"" + NRefactory.CSharp.TextWriterTokenWriter.ConvertStringMaxLength(info.Module == null ? string.Empty : info.Module.Name.String, options.MaxStringLength) + "\"", BoxedTextColor.String);
+
+			if (!string.IsNullOrEmpty(info.Name) && info.Name != memberName) {
+				output.Write(" ", BoxedTextColor.Text);
+				output.Write("as", BoxedTextColor.Keyword);
+				output.Write(" ", BoxedTextColor.Text);
+				output.Write("\"" + NRefactory.CSharp.TextWriterTokenWriter.ConvertStringMaxLength(info.Name, options.MaxStringLength) + "\"", BoxedTextColor.String);
+			}
+
+			if (info.IsNoMangle) {
+				output.Write(" ", BoxedTextColor.Text);
+				output.Write("nomangle", BoxedTextColor.Keyword);
+			}
+
+			if (info.IsCharSetAnsi) {
+				output.Write(" ", BoxedTextColor.Text);
+				output.Write("ansi", BoxedTextColor.Keyword);
+			}
+			else if (info.IsCharSetAuto) {
+				output.Write(" ", BoxedTextColor.Text);
+				output.Write("autochar", BoxedTextColor.Keyword);
+			}
+			else if (info.IsCharSetUnicode) {
+				output.Write(" ", BoxedTextColor.Text);
+				output.Write("unicode", BoxedTextColor.Keyword);
+			}
+
+			if (info.SupportsLastError) {
+				output.Write(" ", BoxedTextColor.Text);
+				output.Write("lasterr", BoxedTextColor.Keyword);
+			}
+
+			if (info.IsCallConvCdecl) {
+				output.Write(" ", BoxedTextColor.Text);
+				output.Write("cdecl", BoxedTextColor.Keyword);
+			}
+			else if (info.IsCallConvFastcall) {
+				output.Write(" ", BoxedTextColor.Text);
+				output.Write("fastcall", BoxedTextColor.Keyword);
+			}
+			else if (info.IsCallConvStdcall) {
+				output.Write(" ", BoxedTextColor.Text);
+				output.Write("stdcall", BoxedTextColor.Keyword);
+			}
+			else if (info.IsCallConvThiscall) {
+				output.Write(" ", BoxedTextColor.Text);
+				output.Write("thiscall", BoxedTextColor.Keyword);
+			}
+			else if (info.IsCallConvWinapi) {
+				output.Write(" ", BoxedTextColor.Text);
+				output.Write("winapi", BoxedTextColor.Keyword);
+			}
+
+			if (info.IsBestFitEnabled) {
+				output.Write(" ", BoxedTextColor.Text);
+				output.Write("bestfit", BoxedTextColor.Keyword);
+				output.Write(":", BoxedTextColor.Punctuation);
+				output.Write("on", BoxedTextColor.Keyword);
+			}
+			else if (info.IsBestFitDisabled) {
+				output.Write(" ", BoxedTextColor.Text);
+				output.Write("bestfit", BoxedTextColor.Keyword);
+				output.Write(":", BoxedTextColor.Punctuation);
+				output.Write("off", BoxedTextColor.Keyword);
+			}
+
+			if (info.IsThrowOnUnmappableCharEnabled) {
+				output.Write(" ", BoxedTextColor.Text);
+				output.Write("charmaperror", BoxedTextColor.Keyword);
+				output.Write(":", BoxedTextColor.Punctuation);
+				output.Write("on", BoxedTextColor.Keyword);
+			}
+			else if (info.IsThrowOnUnmappableCharDisabled) {
+				output.Write(" ", BoxedTextColor.Text);
+				output.Write("charmaperror", BoxedTextColor.Keyword);
+				output.Write(":", BoxedTextColor.Punctuation);
+				output.Write("off", BoxedTextColor.Keyword);
+			}
+		}
+
 		void WriteAttributes(CustomAttributeCollection attributes) {
 			for (int i = 0; i < attributes.Count; i++) {
 				var a = attributes[i];
@@ -1692,7 +1751,13 @@ namespace ICSharpCode.Decompiler.Disassembler {
 				output.Write(" ", BoxedTextColor.Text);
 				a.Constructor.WriteMethodTo(output, sb);
 				uint blobOffset = a.BlobOffset;
-				if (blobOffset != 0 && options.OwnerModule is ModuleDefMD md &&
+				if (a.IsRawBlob) {
+					output.Write(" ", BoxedTextColor.Text);
+					output.Write("=", BoxedTextColor.Operator);
+					output.Write(" ", BoxedTextColor.Text);
+					WriteBlob(a.RawData);
+				}
+				else if (blobOffset != 0 && options.OwnerModule is ModuleDefMD md &&
 				    md.Metadata.BlobStream.TryCreateReader(blobOffset, out var reader)) {
 					output.Write(" ", BoxedTextColor.Text);
 					output.Write("=", BoxedTextColor.Operator);
